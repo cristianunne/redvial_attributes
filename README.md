@@ -1,2 +1,0 @@
-# redvial_attributes
- 

@@ -1,6 +1,0 @@
-<RCC>
-    <qresource prefix="/plugins/redvial_attributes" >
-        <file>icon.png</file>
-        <file>editar_attr.png</file>
-    </qresource>
-</RCC>
