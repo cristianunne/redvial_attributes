@@ -4,6 +4,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from qgis.core import *
 from qgis.gui import QgsAttributeDialog
+from qgis.gui import QgsMessageBar
 
 #Traigo la herramienta de seleccion
 from .editarattrtool import EditarAttrTool
@@ -15,6 +16,10 @@ class ModifiedAtributeTool():
         self.iface = iface
         self.toolbar = toolbar
         self.canvas = self.iface.mapCanvas()
+
+        self.table_atributos = None
+        self.table_attr_changes = None
+
 
         self.result = False
 
@@ -42,15 +47,31 @@ class ModifiedAtributeTool():
     def act_modified_attr(self):
 
         if self.md_attr.isChecked():
-            self.canvas.setMapTool(self.tool)
-            self.tool.select_.connect(self.alm_res)
-            self.activate()
 
-            if self.result != False:
-                print(self.result)
+            #controlo aca la existencia de las capas
+            try:
 
-            else:
-                pass
+                # las tablas necesarias para trabajar
+                self.table_atributos = QgsProject.instance().mapLayersByName('atributos')[0]
+                self.table_attr_changes = QgsProject.instance().mapLayersByName('attr_changes')[0]
+
+                self.canvas.setMapTool(self.tool)
+                self.tool.select_.connect(self.alm_res)
+                self.activate()
+
+                if self.result != False:
+                    print(self.result)
+
+                else:
+                    pass
+
+
+            except (IndexError):
+
+                self.iface.messageBar().pushMessage("Error", "Debe cargar la capa 'atributos', 'atributos' y 'attr_changes'", Qgis.Critical, 5)
+
+                self.md_attr.setChecked(False)
+
 
 
         else:
@@ -68,6 +89,11 @@ class ModifiedAtributeTool():
     def activate(self):
 
         print("Activo la herramienta Modificar Atributos")
+
+
+        #compruebo que las capas esten presentes sino desactivo e informo
+
+
 
     def deactivate(self):
 

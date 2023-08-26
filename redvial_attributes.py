@@ -32,6 +32,8 @@ from .redvial_attributes_dialog import RedVialAttributesDialog
 import os.path
 
 from .modifiedatributetool import ModifiedAtributeTool
+from .HistorySegmentTool import HistorySegmentTool
+from .CreateRedVialTool import CreateRedVialTool
 
 
 class RedVialAttributes:
@@ -71,7 +73,12 @@ class RedVialAttributes:
     def initGui(self):
 
         self.modified_attr_tool = ModifiedAtributeTool(self.iface, self.toolbar)
+
+        self.history_tool = HistorySegmentTool(self.iface, self.toolbar)
+
+        self.created_red_tool = CreateRedVialTool(self.iface, self.toolbar)
         self.toolbar.addSeparator()
+
 
 
     def unload(self):

@@ -2,9 +2,13 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from qgis._core import QgsProject, QgsEditFormConfig
 from qgis.gui import *
-from qgis.core import QgsFeature, QgsGeometry, QgsPoint
+from qgis.core import QgsFeature, QgsGeometry, QgsPoint, Qgis
 from qgis.gui import QgsAttributeDialog, QgsAttributeForm
 
+
+import datetime
+
+from .atributes_dialog import AtributesDialog
 from .fields_definitions import TableAtributosNames, TableAttrChanges
 
 
@@ -48,9 +52,30 @@ class EditarAttrTool(QgsMapTool):
 
         self.NAME_CAMPOS_ATTRCHANGES = TableAttrChanges()
 
-        # las tablas necesarias para trabajar
-        self.table_atributos = QgsProject.instance().mapLayersByName('atributos')[0]
-        self.table_attr_changes = QgsProject.instance().mapLayersByName('attr_changes')[0]
+        self.table_atributos = None
+        self.table_attr_changes = None
+
+        self.initialize()
+
+
+
+    def initialize(self):
+
+        # controlo aca la existencia de las capas
+        try:
+            # las tablas necesarias para trabajar
+            self.table_atributos = QgsProject.instance().mapLayersByName('atributos')[0]
+            self.table_attr_changes = QgsProject.instance().mapLayersByName('attr_changes')[0]
+            self.refermapa_category = QgsProject.instance().mapLayersByName('refermapa_category')[0]
+
+
+        except (IndexError):
+
+            self.iface.messageBar().pushMessage("Error",
+                                                "Debe cargar la capa 'atributos', 'attr_changes' y 'refermapa_category'",
+                                                Qgis.Critical, 5)
+
+
 
     def canvasPressEvent(self, e):
         self.qpoint = self.toMapCoordinates(e.pos())
@@ -67,21 +92,128 @@ class EditarAttrTool(QgsMapTool):
             # Guardo una copia de los atributos y luego comparo para saber cual fue cambiado fields
             # print(self.geom_Sel.fields()[0])
             # print(self.geom_Sel.id())
-            # print(self.geom_Sel.attributes())
+            #print(self.geom_Sel.attributes())
 
             # Con el ID de la geometria traigo los datos de la tabla
             # Guardo los atributos antiguos
-            self.showFormAtributesTableById(self.geom_Sel.id())
+
+            self.shoFormAttrTableById(self.geom_Sel)
 
 
         else:
             self.select_.emit(False)
 
-    def showFormAtributesTableById(self, id_current):
 
+    def shoFormAttrTableById(self, geom_Sel):
+        id_current = geom_Sel.id()
         layer_table_atributes = self.table_atributos
-        print("layer atributos")
-        print(layer_table_atributes)
+
+        feature_target = None
+
+        idx_redvial = layer_table_atributes.fields().indexFromName(self.NAME_CAMPOS.REDVIAL_IDREDVIAL)
+
+        for feat in layer_table_atributes.getFeatures():
+
+            # feat id lo trago desde el campo redvial_idredvial
+
+            id_feat = feat.attributes()[idx_redvial]
+            idx_actual = feat.fields().indexFromName(self.NAME_CAMPOS.ACTUAL)
+
+            if id_feat == id_current and feat.attributes()[idx_actual] == True:
+                # ecnotro el objeto, o trabajo en el formulario
+                feature_target = feat
+                break
+
+        # con el target abro lo que necesido
+        old_attr = None
+        new_attr = None
+
+        if feature_target:
+            # Guardo los atributos viejos
+            old_attr = feature_target.attributes()
+
+            new_feature = QgsFeature()
+            #hago una copia los fields
+            fields = layer_table_atributes.fields()
+            new_feature.initAttributes(fields.count())
+            provider = layer_table_atributes.dataProvider()
+
+            idx_id = fields.indexFromName(self.NAME_CAMPOS.ID)
+
+            idx_modified = fields.indexFromName(self.NAME_CAMPOS.MODIFIED)
+
+            max_id = layer_table_atributes.maximumValue(idx_id)
+
+            tblattr_dp = layer_table_atributes.dataProvider()
+            layer_table_atributes.startEditing()
+
+            att_form = AtributesDialog(self.iface)
+
+            result_attrdialog = None
+
+            if att_form.initialize(geom_Sel, self.refermapa_category):
+                result_attrdialog = att_form.exec()
+
+            if result_attrdialog == 1:
+
+                if self.compareData(att_form.feature_target, att_form.feature_data):
+
+                    # si son diferentes hayq eu guardar en attributes
+
+                    max_id = layer_table_atributes.maximumValue(idx_id)
+
+                    att_form.feature_data[idx_id] = max_id + 1
+
+                    tblattr_dp.addFeatures([att_form.feature_data])
+
+                    res_savenew = layer_table_atributes.commitChanges()
+
+                    if res_savenew:
+                        # cambio a false el anterior que quedo gaurdado en oldattr
+                        idx_actual = fields.indexFromName(self.NAME_CAMPOS.ACTUAL)
+                        set_false = self.changeToFalseOldAttr(idx_actual, feature_target)
+
+
+                        if set_false:
+                            # si paso guardo los old y los new attr
+                            max_id = layer_table_atributes.maximumValue(idx_id)
+                            # limpiamos la seleccion y nos aseguramos que sea el ultimo id
+                            layer_table_atributes.removeSelection()
+
+                            layer_table_atributes.select(max_id)
+                            feat_selected = layer_table_atributes.getSelectedFeatures()
+
+                            feat_new = None
+
+                            # Guardo los atributos viejos
+                            for f in feat_selected:
+                                feat_new = f
+                                # print(feat_new.attributes())
+                                break
+
+                            new_attr = att_form.feature_data.attributes()
+
+
+
+                            self.saveAllEventChangedInAttChangesTable(old_attr, new_attr, feat_new)
+
+                        if set_false == False:
+                            layer_table_atributes.rollBack()
+
+                else:
+                    print('sin cambios')
+
+            else:
+                layer_table_atributes.rollBack()
+
+
+
+
+    def showFormAtributesTableById(self, geom_Sel):
+
+        id_current = geom_Sel.id()
+        layer_table_atributes = self.table_atributos
+
 
         # feat.fields().indexFromName('refermapa')
         feature_target = None
@@ -103,6 +235,9 @@ class EditarAttrTool(QgsMapTool):
         # con el target abro lo que necesido
         old_attr = None
         new_attr = None
+
+
+
         if feature_target:
 
             # Guardo los atributos viejos
@@ -129,55 +264,134 @@ class EditarAttrTool(QgsMapTool):
                 if i == idx_id:
                     new_feature.setAttribute(i, max_id + 1)
 
+            tblattr_dp = layer_table_atributes.dataProvider()
             layer_table_atributes.startEditing()
-            att_form = QgsAttributeDialog(layer_table_atributes, new_feature, False)
-            att_form.setMode(QgsAttributeEditorContext.AddFeatureMode)
-            aa = att_form.exec_()
-
-            if aa == 1:
-                res_savenew = layer_table_atributes.commitChanges()
-                # si salio ok, seteco
-
-                if res_savenew:
-
-                    # cambio a false el anterior que quedo gaurdado en oldattr
-                    idx_actual = fields.indexFromName(self.NAME_CAMPOS.ACTUAL)
-
-                    set_false = self.changeToFalseOldAttr(idx_actual, feature_target)
-
-                    if set_false:
-
-                        #si paso guardo los old y los new attr
-                        max_id = layer_table_atributes.maximumValue(idx_id)
-
-                        #limpiamos la seleccion y nos aseguramos que sea el ultimo id
-                        layer_table_atributes.removeSelection()
-
-                        layer_table_atributes.select(max_id)
-                        feat_selected = layer_table_atributes.getSelectedFeatures()
-                        feat_new = None
-                        # Guardo los atributos viejos
-                        for f in feat_selected:
-                            feat_new = f
-                            #print(feat_new.attributes())
-                            break
-
-                        new_attr = feat_new.attributes()
-                        #print(feat_new)
+            #att_form = QgsAttributeDialog(layer_table_atributes, new_feature, False)
+            #att_form.setMode(QgsAttributeEditorContext.AddFeatureMode)
 
 
-                        self.saveAllEventChangedInAttChangesTable(old_attr, new_attr, feat_new)
+            att_form = AtributesDialog(self.iface)
+
+            result_attrdialog = None
+
+            if att_form.initialize(geom_Sel):
+
+                result_attrdialog = att_form.exec()
+
+            if result_attrdialog == 1:
+                print(att_form.feature_target.attributes())
+                print(att_form.feature_data.attributes())
+
+                if self.compareData(att_form.feature_target, att_form.feature_data):
+
+                    #si son diferentes hayq eu guardar en attributes
+
+                    max_id = layer_table_atributes.maximumValue(idx_id)
+                    att_form.feature_data[idx_id] = max_id
+
+                    tblattr_dp.addFeatures([att_form.feature_data])
+
+                    
+
+                    res_savenew = layer_table_atributes.commitChanges()
 
 
-
-
-
-                    if set_false == False:
-                        layer_table_atributes.rollBack()
-
+                else:
+                    print('sin cambios')
 
             else:
                 layer_table_atributes.rollBack()
+
+
+
+
+
+    def compareData(self, fselect, fdata):
+
+        #utilizare la tabla attributes
+        tabla_atributes_fields = TableAtributosNames()
+        fields = fselect.fields()
+
+        idx_tramo = fields.indexFromName(self.NAME_CAMPOS.TRAMO)
+        idx_created = fields.indexFromName(self.NAME_CAMPOS.CREATED)
+
+        idx_zona = fields.indexFromName(self.NAME_CAMPOS.ZONA)
+        idx_cc = fields.indexFromName(self.NAME_CAMPOS.CC)
+        idx_nombre = fields.indexFromName(self.NAME_CAMPOS.NOMBRE)
+        idx_mantenim = fields.indexFromName(self.NAME_CAMPOS.MANTEMIM)
+        idx_jurisdic = fields.indexFromName(self.NAME_CAMPOS.JURISDIC)
+        idx_jerarq = fields.indexFromName(self.NAME_CAMPOS.JERARQ)
+        idx_mat_calzad = fields.indexFromName(self.NAME_CAMPOS.MAT_CALZAD)
+        idx_refermapa = fields.indexFromName(self.NAME_CAMPOS.REFERMAPA)
+        idx_idsuma = fields.indexFromName(self.NAME_CAMPOS.IDSUMA)
+
+        idx_tipo = fields.indexFromName(self.NAME_CAMPOS.TIPO)
+        idx_observacion = fields.indexFromName(self.NAME_CAMPOS.OBSERVACION)
+        idx_jerabr = fields.indexFromName(self.NAME_CAMPOS.JER_ABR)
+        idx_ruleid = fields.indexFromName(self.NAME_CAMPOS.RULEID)
+
+        idx_modified = fields.indexFromName(self.NAME_CAMPOS.MODIFIED)
+        idx_fechaobra = fields.indexFromName(self.NAME_CAMPOS.FECHAOBRA)
+        idx_autovia = fields.indexFromName(self.NAME_CAMPOS.AUTOVIA)
+
+
+        if fselect[idx_tramo] != fdata[idx_tramo]:
+            return True
+
+        if fselect[idx_created] != fdata[idx_created]:
+            return True
+
+        if fselect[idx_zona] != fdata[idx_zona]:
+            return True
+
+        if fselect[idx_cc] != fdata[idx_cc]:
+            return True
+
+        if fselect[idx_nombre] != fdata[idx_nombre]:
+            return True
+
+        if fselect[idx_mantenim] != fdata[idx_mantenim]:
+            return True
+
+        if fselect[idx_jurisdic] != fdata[idx_jurisdic]:
+            return True
+
+        if fselect[idx_jerarq] != fdata[idx_jerarq]:
+            return True
+
+        if fselect[idx_mat_calzad] != fdata[idx_mat_calzad]:
+            return True
+
+        if fselect[idx_refermapa] != fdata[idx_refermapa]:
+            return True
+
+        if fselect[idx_idsuma] != fdata[idx_idsuma]:
+            return True
+
+        if fselect[idx_tipo] != fdata[idx_tipo]:
+            return True
+
+        if fselect[idx_observacion] != fdata[idx_observacion]:
+            return True
+
+        if fselect[idx_jerabr] != fdata[idx_jerabr]:
+            return True
+
+        if fselect[idx_ruleid] != fdata[idx_ruleid]:
+            return True
+
+        if fselect[idx_modified] != fdata[idx_modified]:
+            return True
+
+        if fselect[idx_fechaobra] != fdata[idx_fechaobra]:
+            return True
+
+        if fselect[idx_autovia] != fdata[idx_autovia]:
+            return True
+
+        return False
+
+
 
     def changeToFalseOldAttr(self, idx_actual, feature_target):
 
@@ -185,11 +399,11 @@ class EditarAttrTool(QgsMapTool):
         self.table_atributos.changeAttributeValue(feature_target.id(), idx_actual, False)
         res_savenew = self.table_atributos.commitChanges()
 
+
         if res_savenew:
             return True
 
         return False
-
 
 
     """
@@ -206,6 +420,7 @@ class EditarAttrTool(QgsMapTool):
 
         idx_actual = fields.indexFromName(self.NAME_CAMPOS.ACTUAL)
 
+        new_feaures = []
 
         # recorro los atributo
         for i in range(len(old_attr)):
@@ -217,8 +432,24 @@ class EditarAttrTool(QgsMapTool):
                     #nombre del field a pasar
                     field = self.selectField(feat_selected, i)
 
-                    self.processAttr(field, old_attr[i], new_attr[i], feat_selected.id())
+                    new_feat = self.processAttr(field, old_attr[i], new_attr[i], feat_selected.id())
+                    new_feaures.append(new_feat)
 
+
+        #guardo los cambios aqui
+
+        # traigo la tabal attr change
+
+        table_attrch = self.table_attr_changes.dataProvider()
+
+
+        self.table_attr_changes.startEditing()
+
+        res_add_feat = table_attrch.addFeatures(new_feaures)
+        res_savenew = self.table_attr_changes.commitChanges()
+
+        if res_savenew == False:
+            self.table_attr_changes.rollBack()
 
 
 
@@ -245,32 +476,20 @@ class EditarAttrTool(QgsMapTool):
         idx_atributo = fields.indexFromName(self.NAME_CAMPOS_ATTRCHANGES.ATRIBUTO)
         idx_oldvalue = fields.indexFromName(self.NAME_CAMPOS_ATTRCHANGES.OLD_VALUE)
         idx_newvalue = fields.indexFromName(self.NAME_CAMPOS_ATTRCHANGES.NEW_VALUE)
+        idx_created = fields.indexFromName(self.NAME_CAMPOS_ATTRCHANGES.CREATED)
         idx_atributos_idatributos = fields.indexFromName(self.NAME_CAMPOS_ATTRCHANGES.ATRIBUTOS_IDATRIBUTOS)
 
         new_feature = QgsFeature(fields)
-        
 
+        #proceso los campos individualmete
+        new_feature[idx_atributo] = atributo
+        new_feature[idx_oldvalue] = old_value
+        new_feature[idx_newvalue] = new_value
+        new_feature[idx_created] = str(datetime.datetime.now())
 
-        # cargo los atributos del nuevo feature
-        for i in range(fields.count()):
+        new_feature[idx_atributos_idatributos] = atributos_idatributos
 
-            if i != idx_id:
-                new_feature.setAttribute(i, old_attr[i])
-
-
-
-
-        #traigo la tabal attr change
-
-        self.table_attr_changes.startEditing()
-        self.table_attr_changes.changeAttributeValue(feature_target.id(), idx_actual, False)
-        res_savenew = self.table_atributos.commitChanges()
-
-
-        print(atributo)
-        print(old_value)
-        print(new_value)
-        print(atributos_idatributos)
+        return new_feature
 
 
 
@@ -282,44 +501,12 @@ class EditarAttrTool(QgsMapTool):
 
         return False
 
-    def addFeature(self, feature_select):
-
-        # crear un feature y copiarle los datos que vienen del seleccionado
-        feature = QgsFeature()
-
-        layer_attr = self.table_atributos
-
-        # traigo los campos
-        fields = layer_attr.fields()
-        feature.initAttributes(fields.count())
-        provider = layer.dataProvider()
-
-    def addFeatures_(self, feature, layer, field, pointValue):
-        fields = layer.fields()
-        feature.initAttributes(fields.count())
-        provider = layer.dataProvider()
-        for i in range(fields.count()):
-            value = provider.defaultValue(i) if fields[i].name() != field else pointValue
-            if value:
-                feature.setAttribute(i, value)
-                form = QgsAttributeDialog(layer, feature, False)
-                form.setMode(QgsAttributeForm.AddFeatureMode)
-                formSuppress = layer.editFormConfig().suppress()
-
-                if formSuppress == QgsEditFormConfig.SuppressDefault:
-                    if self.getSuppressOptions():  # this is calculated every time because user can switch options while using tool
-                        layer.addFeature(feature, True)
-                    else:
-                        if not form.exec_():
-                            feature.setAttributes(form.feature().attributes())
-                elif formSuppress == QgsEditFormConfig.SuppressOff:
-                    if not form.exec_():
-                        feature.setAttributes(form.feature().attributes())
-                else:
-                    layer.addFeature(feature, True)
 
     def activate(self):
         self.canvas.setCursor(self.cursor)
+
+        #controlo el error
+
 
     def deactivate(self):
 
@@ -362,3 +549,81 @@ class EditarAttrTool(QgsMapTool):
             return True
         else:
             return False
+
+
+    def changeReferMapa(self, jurisd, jerar, mat_calzad, tipo):
+
+
+        #Primero cargo
+
+
+
+        if tipo == 'ACCESO':
+
+            if mat_calzad == 'PAVIMENTO':
+                return 'ACCESO PAVIMENTADO'
+
+            elif mat_calzad == 'CONSOLIDADO':
+                return 'ACCESO CONSOLIDADO'
+
+            elif mat_calzad == 'TIERRA':
+                return 'ACCESO DE TIERRA'
+
+        if tipo == 'AUTOVIA':
+            return 'AUTOVIA'
+
+        elif tipo == 'CAMINO':
+            if jurisd == 'PROVINCIAL' and jerar == 'TERCIARIA' and mat_calzad == 'TIERRA':
+                return 'PROVINCIAL TERCIARIA DE TIERRA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'TERCIARIA' and mat_calzad == 'CONSOLIDADO':
+                return 'PROVINCIAL TERCIARIA CONSOLIDADO'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'TERCIARIA' and mat_calzad == 'PAVIMENTO':
+                return 'PROVINCIAL TERCIARIA PAVIMENTADO'
+
+        elif tipo == 'RUTA':
+            if jurisd == 'PROVINCIAL' and jerar == 'PRIMARIA' and mat_calzad == 'TIERRA':
+                return 'PROVINCIAL PRIMARIA DE TIERRA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'PRIMARIA' and mat_calzad == 'CONSOLIDADO':
+                return 'PROVINCIAL PRIMARIA CONSOLIDADA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'PRIMARIA' and mat_calzad == 'PAVIMENTO':
+                return 'PROVINCIAL PRIMARIA PAVIMENTADA'
+
+
+
+            if jurisd == 'PROVINCIAL' and jerar == 'SECUNDARIA' and mat_calzad == 'CONSOLIDADO':
+                return 'PROVINCIAL SECUNDARIA CONSOLIDADA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'SECUNDARIA' and mat_calzad == 'PAVIMENTO':
+                return 'PROVINCIAL SECUNDARIA PAVIMENTADA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'SECUNDARIA' and mat_calzad == 'TIERRA':
+                return 'PROVINCIAL SECUNDARIA DE TIERRA'
+
+            if jurisd == 'NACIONAL' and jerar == 'TRONCAL' and mat_calzad == 'PAVIMENTO':
+                return 'NACIONAL PAVIMENTADA'
+
+
+        elif tipo == 'VINCULACION':
+
+            if jurisd == 'PROVINCIAL' and jerar == 'TERCIARIA' and mat_calzad == 'TIERRA':
+                return 'PROVINCIAL TERCIARIA DE TIERRA'
+
+            elif jurisd == 'NACIONAL' and jerar == 'TRONCAL' and mat_calzad == 'PAVIMENTO':
+                return 'NACIONAL PAVIMENTADA'
+
+            elif jurisd == 'PROVINCIAL' and jerar == 'PRIMARIA' and mat_calzad == 'PAVIMENTO':
+                return 'PROVINCIAL PRIMARIA PAVIMENTADA'
+
+
+
+
+
+
+
+
+
+

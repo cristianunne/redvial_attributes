@@ -1,0 +1,29 @@
+   if res_savenew:
+                        # cambio a false el anterior que quedo gaurdado en oldattr
+
+                        idx_actual = fields.indexFromName(self.NAME_CAMPOS.ACTUAL)
+                        set_false = self.changeToFalseOldAttr(idx_actual, feature_target)
+
+                        if set_false:
+                            # si paso guardo los old y los new attr
+                            max_id = layer_table_atributes.maximumValue(idx_id)
+
+                            # limpiamos la seleccion y nos aseguramos que sea el ultimo id
+                            layer_table_atributes.removeSelection()
+
+                            layer_table_atributes.select(max_id)
+                            feat_selected = layer_table_atributes.getSelectedFeatures()
+                            feat_new = None
+                            # Guardo los atributos viejos
+                            for f in feat_selected:
+                                feat_new = f
+                                # print(feat_new.attributes())
+                                break
+
+                            new_attr = feat_new.attributes()
+                            # print(feat_new)
+
+                            self.saveAllEventChangedInAttChangesTable(old_attr, new_attr, feat_new)
+
+                        if set_false == False:
+                            layer_table_atributes.rollBack()

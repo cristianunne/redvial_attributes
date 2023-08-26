@@ -2,5 +2,7 @@
     <qresource prefix="/plugins/redvial_attributes" >
         <file>icon.png</file>
         <file>editar_attr.png</file>
+        <file>history_line.png</file>
+        <file>red_vial.png</file>
     </qresource>
 </RCC>
